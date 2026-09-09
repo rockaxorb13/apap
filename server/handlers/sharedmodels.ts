@@ -3,57 +3,39 @@ import { SharedModel, SharedModelInsertSchema } from '../db/schema';
 import { buildCrudRouter } from './crud';
 import { concertoValidation } from './concertovalidation';
 import { ModelManager } from '@accordproject/concerto-core';
+import { FileDownloader } from '@accordproject/concerto-util';
 import { HttpModelRetriever, assertAllowedUrl } from './retrievers/HttpModelRetriever';
 
 const router = express.Router();
 
 class SecureFileLoader {
     accepts(url: string): boolean {
-        try {
-            assertAllowedUrl(url);
-            return true;
-        } catch (e) {
-            return false;
-        }
+        return url.startsWith('http://') || url.startsWith('https://');
     }
 
     async load(url: string, options: any): Promise<string> {
+        try {
+            assertAllowedUrl(url);
+        } catch (e) {
+            throw new Error(`SSRF Prevention: Transitive import domain or URL not allowed: ${url}`);
+        }
         const retriever = new HttpModelRetriever();
         return await retriever.fetchModel(url);
     }
 }
 
-class SecureDownloader {
-    private fileLoader = new SecureFileLoader();
-    private modelManager: ModelManager;
-
-    constructor(modelManager: ModelManager) {
-        this.modelManager = modelManager;
-    }
-
-    async downloadExternalDependencies(modelFiles: any[], options: any): Promise<any[]> {
-        const downloadedModels: any[] = [];
-        
-        for (const modelFile of modelFiles) {
-            const ast = modelFile.getAst ? modelFile.getAst() : { imports: [] };
-            const imports = ast.imports || [];
-            
-            for (const imp of imports) {
-                const uri = imp.uri;
-                if (typeof uri === 'string' && uri.startsWith('http')) {
-                    if (!this.fileLoader.accepts(uri)) {
-                        throw new Error(`SSRF Prevention: Transitive import domain or URL not allowed: ${uri}`);
-                    }
-                    const content = await this.fileLoader.load(uri, options);
-                    
-                    const parsedModel = this.modelManager.addCTOModel(content, 'transitive.cto', true);
-                    downloadedModels.push(parsedModel);
-                }
+const getExternalImports = (modelFile: any): Record<string, string> => {
+    const ast = modelFile.getAst ? modelFile.getAst() : modelFile.ast;
+    const imports: Record<string, string> = {};
+    if (ast && ast.imports) {
+        for (const imp of ast.imports) {
+            if (imp.uri && typeof imp.uri === 'string') {
+                imports[imp.namespace] = imp.uri;
             }
         }
-        return downloadedModels;
     }
-}
+    return imports;
+};
 
 router.post('/', async (req, res, next) => {
     const uri: string | undefined = req.body?.uri;
@@ -65,10 +47,10 @@ router.post('/', async (req, res, next) => {
 
             const modelManager = new ModelManager({ addMetamodel: true });
             const modelFile = modelManager.addCTOModel(ctoText, 'external.cto', true);
-            
-            const secureDownloader = new SecureDownloader(modelManager);
-            await modelManager.updateExternalModels({}, secureDownloader as any);
-            
+
+            const fileDownloader = new FileDownloader(new SecureFileLoader() as any, getExternalImports);
+            await modelManager.updateExternalModels({}, fileDownloader);
+
             const namespace = modelFile.getNamespace() || 'external';
 
             req.body.model = {
@@ -95,8 +77,6 @@ router.post('/', async (req, res, next) => {
 const crudRouter = buildCrudRouter({
     table: SharedModel,
     typeName: 'SharedModel',
-    // ponytail: cast schema to any due to zod v3 -> v4 upgrade depth-instantiation
-    // issue with drizzle-zod. Runtime unaffected.
     validateBody: { schema: SharedModelInsertSchema as any, custom: (body) => concertoValidation('SharedModel', body) }
 });
 

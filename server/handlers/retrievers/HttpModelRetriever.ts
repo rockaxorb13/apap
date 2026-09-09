@@ -2,7 +2,7 @@ import { IModelRetriever } from './IModelRetriever';
 
 export const MAX_FILE_SIZE = 1024 * 1024; 
 
-export function assertAllowedUrl(uri: string): URL {
+export function assertAllowedUrl(uri: string): { host: string; pathname: string; search: string } {
     if (!uri.startsWith('https://')) {
         throw new Error(`Invalid URI scheme. Only https is allowed.`);
     }
@@ -32,7 +32,7 @@ export function assertAllowedUrl(uri: string): URL {
         throw new Error(`SSRF Prevention: Only official accordproject GitHub repositories are allowed.`);
     }
 
-    return safeUrl;
+    return { host: safeUrl.host, pathname: safeUrl.pathname, search: safeUrl.search };
 }
 
 export class HttpModelRetriever implements IModelRetriever {
@@ -41,7 +41,8 @@ export class HttpModelRetriever implements IModelRetriever {
     }
 
     async fetchModel(uri: string): Promise<string> {
-        const safeUrl = assertAllowedUrl(uri);
+        const { host, pathname, search } = assertAllowedUrl(uri);
+        const finalUrl = `https://${host}${pathname}${search}`;
 
         const headers: Record<string, string> = {};
         if (process.env.EXTERNAL_TEMPLATE_TOKEN) {
@@ -52,7 +53,7 @@ export class HttpModelRetriever implements IModelRetriever {
         const timeoutId = setTimeout(() => controller.abort(), 5000);
         
         try {
-            const response = await fetch(safeUrl.toString(), { 
+            const response = await fetch(finalUrl, {
                 headers,
                 signal: controller.signal,
                 redirect: 'error'
