@@ -1,6 +1,6 @@
 import { IModelRetriever } from './IModelRetriever';
 
-export const MAX_FILE_SIZE = 1024 * 1024; 
+export const MAX_FILE_SIZE = 1024 * 1024;
 
 export function assertAllowedUrl(uri: string): { host: string; pathname: string; search: string } {
     if (!uri.startsWith('https://')) {
@@ -12,6 +12,10 @@ export function assertAllowedUrl(uri: string): { host: string; pathname: string;
         safeUrl = new URL(uri);
     } catch (e) {
         throw new Error(`Malformed URL provided.`);
+    }
+
+    if (safeUrl.username || safeUrl.password) {
+        throw new Error(`SSRF Prevention: User credentials in URL are not allowed.`);
     }
 
     if (safeUrl.port !== '' && safeUrl.port !== '443') {

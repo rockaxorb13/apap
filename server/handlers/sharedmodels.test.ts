@@ -91,4 +91,14 @@ describe('SharedModels SSRF Prevention and Retrieval', () => {
         expect(response.body.model.ctoFiles[0].filename).toBe('org.accordproject.valid@1.0.0.cto');
         expect(response.body.model.ctoFiles[0].contents).toBe(mockCtoText);
     });
+
+    it('should reject URLs containing user credentials', async () => {
+        const response = await request(app)
+            .post('/sharedmodels')
+            .send({ uri: 'https://evil.com@models.accordproject.org/safe.cto' });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toBe('Failed to fetch or parse external model safely.');
+        expect(response.body.details).toContain('SSRF Prevention: User credentials in URL are not allowed.');
+    });
 });
